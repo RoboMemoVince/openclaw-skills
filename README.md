@@ -1,13 +1,38 @@
-# OpenClaw Skills
+# OpenClaw Skills Repository
 
-Personal AI agent skills collection (80+ skills) for OpenClaw framework.
+Personal OpenClaw skills collection — synced from Mac mini.
 
-**Technologies:** Investment analysis, document automation, video processing, NPU development, code review, and more.
+## Structure
 
-**Usage:**
-```bash
-git clone https://github.com/RoboMemoVince/openclaw-skills.git
-ln -s $(pwd)/openclaw-skills/* ~/.openclaw/skills/
+```
+├── workspace/    # Custom skills (Lucy's personal skills)
+│   ├── arxiv-translator/
+│   ├── bilibili-downloader/
+│   ├── claude-code-remote/
+│   ├── claw-backup/
+│   ├── feishu-doc-writer/
+│   ├── flowchart/
+│   ├── openclaw/
+│   ├── openclaw-feishu-interaction-debugger/
+│   ├── pptx-builder/
+│   ├── repo-explorer/
+│   ├── robomemo-dev/
+│   ├── test-robot/
+│   ├── token-usage/
+│   ├── triton-ascend-dev/
+│   ├── triton-cc-collab/
+│   ├── triton-dev/
+│   ├── video-frames/
+│   ├── video-subtitles/
+│   └── workflow-agent/
+│
+└── builtin/      # OpenClaw built-in skills (reference copy)
+    └── ...53 skills
 ```
 
-**License:** Proprietary
+## Sync
+
+- **workspace/** → `/Users/siyuwang/.openclaw/workspace/skills/`
+- **builtin/** → `/opt/homebrew/lib/node_modules/openclaw/skills/`
+
+Last synced: $(date '+%Y-%m-%d')
