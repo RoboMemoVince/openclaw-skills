@@ -35,4 +35,4 @@ Personal OpenClaw skills collection — synced from Mac mini.
 - **workspace/** → `/Users/siyuwang/.openclaw/workspace/skills/`
 - **builtin/** → `/opt/homebrew/lib/node_modules/openclaw/skills/`
 
-Last synced: $(date '+%Y-%m-%d')
+Last synced: 2026-04-28

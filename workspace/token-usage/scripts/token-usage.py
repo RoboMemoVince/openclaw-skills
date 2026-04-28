@@ -53,9 +53,26 @@ DEFAULT_PRICING = {
     "qwen3-max-2026-01-23":       {"input": 0.55,  "output": 1.65,  "cacheRead": 0.14,  "cacheWrite": 0.55},
     "qwen3-coder-plus":           {"input": 0.55,  "output": 1.65,  "cacheRead": 0.14,  "cacheWrite": 0.55},
     "qwen-max":                   {"input": 0.55,  "output": 1.65,  "cacheRead": 0.14,  "cacheWrite": 0.55},
-    # GLM / Zhipu
-    "glm-5":                      {"input": 0.55,  "output": 1.65,  "cacheRead": 0.14,  "cacheWrite": 0.55},
-    "glm-4":                      {"input": 0.55,  "output": 1.65,  "cacheRead": 0.14,  "cacheWrite": 0.55},
+    # GLM / Zhipu (CNY per 1M tokens, from bigmodel.cn/pricing)
+    # currency=CNY — display ¥ instead of $ for these models
+    # GLM-5.1: ¥6/¥8 in, ¥24/¥28 out (low-tier [0,32k) baseline)
+    "glm-5.1":                    {"input": 6.0,   "output": 24.0,  "cacheRead": 1.3,   "cacheWrite": 6.0,   "currency": "CNY"},
+    "glm-5-turbo":                {"input": 5.0,   "output": 22.0,  "cacheRead": 1.2,   "cacheWrite": 5.0,   "currency": "CNY"},
+    "glm-5":                      {"input": 4.0,   "output": 18.0,  "cacheRead": 1.0,   "cacheWrite": 4.0,   "currency": "CNY"},
+    # GLM-4.7: ¥2/¥3/¥4 in, ¥8/¥14/¥16 out ([0,32k) [0,0.2M) out baseline)
+    "glm-4.7":                    {"input": 2.0,   "output": 8.0,   "cacheRead": 0.4,   "cacheWrite": 2.0,   "currency": "CNY"},
+    "glm-4.7-flashx":             {"input": 0.5,   "output": 3.0,   "cacheRead": 0.1,   "cacheWrite": 0.5,   "currency": "CNY"},
+    "glm-4.7-flash":              {"input": 0.0,   "output": 0.0,   "cacheRead": 0.0,   "cacheWrite": 0.0,   "currency": "CNY"},
+    "glm-4.6":                    {"input": 2.0,   "output": 8.0,   "cacheRead": 0.4,   "cacheWrite": 2.0,   "currency": "CNY"},
+    # GLM-4.5-Air: ¥0.8/¥1.2 in, ¥2/¥6/¥8 out ([0,32k) [0,0.2M) baseline)
+    "glm-4.5-air":                {"input": 0.8,   "output": 2.0,   "cacheRead": 0.16,  "cacheWrite": 0.8,   "currency": "CNY"},
+    # Legacy models
+    "glm-4-plus":                 {"input": 5.0,   "output": 15.0,  "cacheRead": 1.0,   "cacheWrite": 5.0,   "currency": "CNY"},
+    "glm-4":                      {"input": 5.0,   "output": 15.0,  "cacheRead": 1.0,   "cacheWrite": 5.0,   "currency": "CNY"},
+    "glm-4-air":                  {"input": 0.5,   "output": 1.5,   "cacheRead": 0.1,   "cacheWrite": 0.5,   "currency": "CNY"},
+    "glm-4-flashx":               {"input": 0.1,   "output": 0.3,   "cacheRead": 0.02,  "cacheWrite": 0.1,   "currency": "CNY"},
+    "glm-4-flash":                {"input": 0.0,   "output": 0.0,   "cacheRead": 0.0,   "cacheWrite": 0.0,   "currency": "CNY"},
+    "glm-4-long":                 {"input": 1.0,   "output": 3.0,   "cacheRead": 0.2,   "cacheWrite": 1.0,   "currency": "CNY"},
     # Kimi (Moonshot)
     "kimi-for-coding":            {"input": 0.55,  "output": 2.20,  "cacheRead": 0.14,  "cacheWrite": 0.55},
     # MiniMax
@@ -87,9 +104,13 @@ def fmt_num(n):
     return f"{n:,}" if n else "0"
 
 
-def fmt_cost(c):
-    """Format cost as $X.XX"""
-    return "$0.00" if c < 0.005 else f"${c:,.2f}"
+def fmt_cost(c, currency="USD"):
+    """Format cost as $X.XX or ¥X.XX"""
+    if c < 0.005:
+        return "$0.00" if currency == "USD" else "¥0.00"
+    if currency == "CNY":
+        return f"¥{c:,.2f}"
+    return f"${c:,.2f}"
 
 
 # ── Pricing ──────────────────────────────────────────────────────────────────
@@ -116,17 +137,19 @@ def load_pricing():
 
 
 def calc_cost(pricing, model_id, input_t, output_t, cache_read, cache_write):
-    """Calculate estimated cost for a message."""
+    """Calculate estimated cost for a message. Returns (cost, currency)."""
     bare = model_id.split("/")[-1] if "/" in model_id else model_id
     p = pricing.get(bare)
     if not p:
-        return 0.0
-    return (
+        return 0.0, "USD"
+    currency = p.get("currency", "USD")
+    cost = (
         input_t    * p.get("input", 0)      / 1_000_000
         + output_t * p.get("output", 0)     / 1_000_000
         + cache_read  * p.get("cacheRead", 0)  / 1_000_000
         + cache_write * p.get("cacheWrite", 0) / 1_000_000
     )
+    return cost, currency
 
 
 # ── Parse JSONL sessions ────────────────────────────────────────────────────
@@ -172,6 +195,12 @@ def parse_sessions(base_dir, tz_offset, pricing, since_ts=None, until_ts=None):
                     if entry_type == "model_change":
                         current_model = obj.get("modelId")
 
+                    elif entry_type == "custom" and obj.get("customType") == "model-snapshot":
+                        data = obj.get("data", {})
+                        mid = data.get("modelId")
+                        if mid:
+                            current_model = mid
+
                     elif entry_type == "message":
                         msg = obj.get("message", {})
                         if msg.get("role") != "assistant":
@@ -180,13 +209,13 @@ def parse_sessions(base_dir, tz_offset, pricing, since_ts=None, until_ts=None):
                         if not usage:
                             continue
 
-                        # Prefer the model field embedded in each message (most accurate),
-                        # then fall back to model_change tracking, then default model.
-                        msg_model = msg.get("model") or msg.get("modelId")
-                        # Skip delivery-mirror and other internal/proxy model names
-                        if msg_model and msg_model.startswith("delivery"):
-                            msg_model = None
+                        # Prefer message-level model, fall back to current_model / default
+                        msg_model = msg.get("model")
                         model = msg_model or current_model or default_model
+
+                        # Skip internal/mirror models with no real usage
+                        if model in ("delivery-mirror",):
+                            continue
                         if not model:
                             continue
 
@@ -206,6 +235,7 @@ def parse_sessions(base_dir, tz_offset, pricing, since_ts=None, until_ts=None):
                         cr  = max(usage.get("cacheRead", 0), 0)
                         cw  = max(usage.get("cacheWrite", 0), 0)
 
+                        cost_val, cost_cur = calc_cost(pricing, model, inp, out, cr, cw)
                         records.append({
                             "date": date_str,
                             "model": model,
@@ -213,7 +243,8 @@ def parse_sessions(base_dir, tz_offset, pricing, since_ts=None, until_ts=None):
                             "output": out,
                             "cacheRead": cr,
                             "cacheWrite": cw,
-                            "cost": calc_cost(pricing, model, inp, out, cr, cw),
+                            "cost": cost_val,
+                            "currency": cost_cur,
                         })
         except Exception:
             continue
@@ -226,21 +257,26 @@ def aggregate(records):
     """Aggregate records by (date, model) → sorted list of daily summaries with per-model breakdown."""
     # Two-level aggregation: date → model → stats
     daily_models = defaultdict(lambda: defaultdict(lambda: {
-        "input": 0, "output": 0, "cacheWrite": 0, "cacheRead": 0, "cost": 0.0,
+        "input": 0, "output": 0, "cacheWrite": 0, "cacheRead": 0, "cost": 0.0, "currency": "USD",
     }))
 
     for r in records:
         d = daily_models[r["date"]][r["model"]]
         for k in ("input", "output", "cacheWrite", "cacheRead", "cost"):
             d[k] += r[k]
+        # Propagate currency from the model (all records for same model share currency)
+        if r.get("currency"):
+            d["currency"] = r["currency"]
 
     result = []
     for date in sorted(daily_models):
         models_data = []
-        day_total = {"input": 0, "output": 0, "cacheWrite": 0, "cacheRead": 0, "cost": 0.0}
+        day_total_usd = {"input": 0, "output": 0, "cacheWrite": 0, "cacheRead": 0, "cost": 0.0}
+        day_total_cny = {"input": 0, "output": 0, "cacheWrite": 0, "cacheRead": 0, "cost": 0.0}
         for model in sorted(daily_models[date]):
             m = daily_models[date][model]
             total = m["input"] + m["output"] + m["cacheWrite"] + m["cacheRead"]
+            cur = m.get("currency", "USD")
             models_data.append({
                 "model": model,
                 "input": m["input"],
@@ -249,10 +285,20 @@ def aggregate(records):
                 "cacheRead": m["cacheRead"],
                 "total": total,
                 "cost": m["cost"],
+                "currency": cur,
             })
+            bucket = day_total_cny if cur == "CNY" else day_total_usd
             for k in ("input", "output", "cacheWrite", "cacheRead", "cost"):
-                day_total[k] += m[k]
+                bucket[k] += m[k]
 
+        day_total = {
+            "input": day_total_usd["input"] + day_total_cny["input"],
+            "output": day_total_usd["output"] + day_total_cny["output"],
+            "cacheWrite": day_total_usd["cacheWrite"] + day_total_cny["cacheWrite"],
+            "cacheRead": day_total_usd["cacheRead"] + day_total_cny["cacheRead"],
+            "cost_usd": day_total_usd["cost"],
+            "cost_cny": day_total_cny["cost"],
+        }
         day_total["total"] = day_total["input"] + day_total["output"] + day_total["cacheWrite"] + day_total["cacheRead"]
         result.append({
             "date": date,
@@ -278,13 +324,14 @@ def render_table(rows):
     print(
         f"  {BOLD}{CYAN}{'Date':<{W_DATE}}{'Models':<{W_MODELS}}"
         f"{'Input':>{W_NUM}}{'Output':>{W_NUM}}{'Cache Create':>{W_NUM}}"
-        f"{'Cache Read':>{W_NUM}}{'Total Tokens':>{W_NUM}}{'Cost (USD)':>{W_COST}}{RESET}"
+        f"{'Cache Read':>{W_NUM}}{'Total Tokens':>{W_NUM}}{'Cost':>{W_COST}}{RESET}"
     )
 
     sep = f"  {GRAY}{'─' * (W_DATE + W_MODELS + W_NUM * 5 + W_COST)}{RESET}"
     print(sep)
 
-    grand = {"input": 0, "output": 0, "cacheWrite": 0, "cacheRead": 0, "total": 0, "cost": 0.0}
+    grand_usd = {"input": 0, "output": 0, "cacheWrite": 0, "cacheRead": 0, "total": 0, "cost": 0.0}
+    grand_cny = {"input": 0, "output": 0, "cacheWrite": 0, "cacheRead": 0, "total": 0, "cost": 0.0}
 
     for row in rows:
         models = row["models"]  # list of {model, input, output, ...}
@@ -301,11 +348,18 @@ def render_table(rows):
                 f"{fmt_num(m['cacheWrite']):>{W_NUM}}"
                 f"{fmt_num(m['cacheRead']):>{W_NUM}}"
                 f"{fmt_num(m['total']):>{W_NUM}}{RESET}"
-                f"{GREEN}{fmt_cost(m['cost']):>{W_COST}}{RESET}"
+                f"{GREEN}{fmt_cost(m['cost'], m.get('currency', 'USD')):>{W_COST}}{RESET}"
             )
 
         # Day subtotal line if multiple models
         if len(models) > 1:
+            # Show separate USD/CNY subtotals if both exist
+            cost_parts = []
+            if row.get("cost_usd", 0) > 0:
+                cost_parts.append(fmt_cost(row["cost_usd"], "USD"))
+            if row.get("cost_cny", 0) > 0:
+                cost_parts.append(fmt_cost(row["cost_cny"], "CNY"))
+            cost_str = " + ".join(cost_parts) if cost_parts else "$0.00"
             print(
                 f"  {'':<{W_DATE}}"
                 f"{DIM}{'(day total)':<{W_MODELS}}{RESET}"
@@ -314,33 +368,52 @@ def render_table(rows):
                 f"{fmt_num(row['cacheWrite']):>{W_NUM}}"
                 f"{fmt_num(row['cacheRead']):>{W_NUM}}"
                 f"{fmt_num(row['total']):>{W_NUM}}"
-                f"{fmt_cost(row['cost']):>{W_COST}}{RESET}"
+                f"{cost_str:>{W_COST}}{RESET}"
             )
 
-        for k in ("input", "output", "cacheWrite", "cacheRead", "total"):
-            grand[k] += row[k]
-        grand["cost"] += row["cost"]
+        for m in models:
+            cur = m.get("currency", "USD")
+            bucket = grand_cny if cur == "CNY" else grand_usd
+            for k in ("input", "output", "cacheWrite", "cacheRead"):
+                bucket[k] += m[k]
+            bucket["total"] += m["total"]
+            bucket["cost"] += m["cost"]
 
     print(sep)
+    total_input = grand_usd["input"] + grand_cny["input"]
+    total_output = grand_usd["output"] + grand_cny["output"]
+    total_cw = grand_usd["cacheWrite"] + grand_cny["cacheWrite"]
+    total_cr = grand_usd["cacheRead"] + grand_cny["cacheRead"]
+    total_tokens = grand_usd["total"] + grand_cny["total"]
+    cost_parts = []
+    if grand_usd["cost"] > 0:
+        cost_parts.append(fmt_cost(grand_usd["cost"], "USD"))
+    if grand_cny["cost"] > 0:
+        cost_parts.append(fmt_cost(grand_cny["cost"], "CNY"))
+    cost_str = " + ".join(cost_parts) if cost_parts else "$0.00"
     print(
         f"  {BOLD}{WHITE}{'Total':<{W_DATE}}{'':<{W_MODELS}}"
-        f"{fmt_num(grand['input']):>{W_NUM}}"
-        f"{fmt_num(grand['output']):>{W_NUM}}"
-        f"{fmt_num(grand['cacheWrite']):>{W_NUM}}"
-        f"{fmt_num(grand['cacheRead']):>{W_NUM}}"
-        f"{fmt_num(grand['total']):>{W_NUM}}{RESET}"
-        f"{BOLD}{GREEN}{fmt_cost(grand['cost']):>{W_COST}}{RESET}"
+        f"{fmt_num(total_input):>{W_NUM}}"
+        f"{fmt_num(total_output):>{W_NUM}}"
+        f"{fmt_num(total_cw):>{W_NUM}}"
+        f"{fmt_num(total_cr):>{W_NUM}}"
+        f"{fmt_num(total_tokens):>{W_NUM}}{RESET}"
+        f"{BOLD}{GREEN}{cost_str:>{W_COST}}{RESET}"
     )
     print()
 
 
 def render_json(rows):
     """Output as JSON."""
-    grand = {"input": 0, "output": 0, "cacheWrite": 0, "cacheRead": 0, "total": 0, "cost": 0.0}
+    grand_usd = {"input": 0, "output": 0, "cacheWrite": 0, "cacheRead": 0, "total": 0, "cost": 0.0}
+    grand_cny = {"input": 0, "output": 0, "cacheWrite": 0, "cacheRead": 0, "total": 0, "cost": 0.0}
     for row in rows:
-        for k in ("input", "output", "cacheWrite", "cacheRead", "total"):
-            grand[k] += row[k]
-        grand["cost"] += row["cost"]
+        for m in row["models"]:
+            cur = m.get("currency", "USD")
+            bucket = grand_cny if cur == "CNY" else grand_usd
+            for k in ("input", "output", "cacheWrite", "cacheRead", "total"):
+                bucket[k] += m[k]
+            bucket["cost"] += m["cost"]
 
     # Flatten models list to just names for backward compat
     out_rows = []
@@ -354,7 +427,8 @@ def render_json(rows):
     print(json.dumps({
         "title": "OpenClaw Token Usage Report — Daily",
         "days": out_rows,
-        "total": grand,
+        "total_usd": grand_usd,
+        "total_cny": grand_cny,
     }, indent=2, ensure_ascii=False))
 
 
